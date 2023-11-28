@@ -1,0 +1,149 @@
+---
+title: "Trabalho Prático - IEC"
+author: "Andre Augusto Moreira Martins"
+date: "2023-11-28"
+output: html_document
+---
+
+## 1- Introdução 
+- Para o presente trabalho, utilizei o método computacionalmente intensivo ["bootstrap"](https://pt.wikipedia.org/wiki/Bootstrapping_(estat%C3%ADstica)) para a construção de intervalos de confiança para a média populacional de interesse;
+
+- Para isso, programei uma função em R que recebe dois parâmetros (amostra, alpha) e calcula, por meio do Bootstrap, um Intervalo de Confiança para a média populacional, de onde essa amostra foi retirada;
+
+- Após isso, realizei a análise de desempenho, via método Monte Carlo. Isto é, gerei amostras aleatórias de distribuições discreta (Poisson) e contínua (Normal), estimei o IC da média pelo método apresentado acima e comparei o desempenho de cada IC, através da proporção de cobertura, com o desempenho do IC clássico para a média populacional;
+
+- Observação: Resolvi utilizar o método bootstrap, em vez do jacknife, como uma forma de aprendizado e aprofundamento nessa metodologia. Ambos são muito importantes, mas acredito que, no mundo, o Bootstrap seja mais usufruído/conhecido, o que torna-se crucial ter um bom conhecimento sobre esse método computacionalmente intensivo;
+
+## 2- Desenvolvimento do código
+
+### 2.1- Criando a função para calcular o IC Computacionalmente Intensivo via bootstrap
+```{r}
+IC_CI <- function(orig_sample, alfa){
+  # Autor:
+  #   André Augusto Moreira Martins
+  #   Departamento de Estatistica-UFMG
+  #   E-mail: augustoandremm2@ufmg.br [2023]
+  len_sample = length(orig_sample) 
+  rep_bootstrap = 2000 
+  
+  # Criando um vetor para armazenar as médias
+  boots_estimates = numeric(rep_bootstrap) 
+  
+  for(i in 1:rep_bootstrap){
+    new_sample = sample(x=orig_sample, size=len_sample, replace=T)
+    boots_estimates[i] = mean(new_sample)
+  }
+  
+  original_mean_estimate = mean(orig_sample)
+  boots_mean_estimate = mean(boots_estimates)
+  
+  # Estimativa corrigida conforme visto em sala de aula
+  boots_mean_estimate_adjust = (2*original_mean_estimate) - boots_mean_estimate
+  
+  sd_estimate <- sd(boots_estimates)
+  
+  # Criando IC com estimativa para a média ajustada
+  ls <- boots_mean_estimate_adjust + qnorm(1-alfa/2)*sd_estimate
+  li <- boots_mean_estimate_adjust - qnorm(1-alfa/2)*sd_estimate
+  
+  return(list("IC(μ, 1-α)","LI"=li,"LS"=ls))
+} 
+
+IC_CI(rnorm(100), 0.05)
+```
+
+### 2.2- Criando a função para calcular o IC clássico:
+```{r}
+IC_CL <- function(orig_sample, alpha){
+  n = length(orig_sample)
+  li <- mean(orig_sample) - qt(1-alpha/2,n-1)*sd(orig_sample)/sqrt(n)
+  ls <- mean(orig_sample) + qt(1-alpha/2,n-1)*sd(orig_sample)/sqrt(n)
+  
+  return(list("IC(μ, 1-α)","LI"=li,"LS"=ls))
+}
+
+IC_CL(rnorm(100), 0.05)
+```
+
+### 2.3- Análise de desempenho via método Monte Carlo
+- Observação: Para conseguir obter melhores resultados, e ter algum método de comparação com diferentes tamanhos de amostras para as distribuições, resolvi organizar as informações em vetores, e depois juntar tudo em um data.frame, contendo os campos: distribuição, tam_amostra, cobertura_CI, cobertura_CL
+```{r}
+tam_amostra <- c(10, 20, 50, 100, 200)
+n_corridas <- 100
+mi = 5
+alpha = 0.05
+
+cob_poisson_CI <- c()
+cob_poisson_CL <- c()
+cob_normal_CI <- c()
+cob_normal_CL <- c()
+
+
+for (i in 1:5){
+  v_cob_poisson_CI = 0 
+  v_cob_poisson_CL = 0 
+  v_cob_normal_CI = 0 
+  v_cob_normal_CL = 0 
+  
+  for(j in 1:n_corridas){
+      n_amostra <- tam_amostra[i]
+      
+      # Calculando IC computacionalmente intensivo:
+      pois_limit <- IC_CI(rpois(n_amostra, lambda = mi), alpha)
+      normal_limit <- IC_CI(rnorm(n_amostra, mean = mi), alpha)
+    
+      #Calculando a cobertura (nivel de acerto) do IC_CI
+      if( (mi > pois_limit$LI) & (mi < pois_limit$LS) ){
+        v_cob_poisson_CI <- v_cob_poisson_CI + 1
+      }
+      
+      if( (mi > normal_limit$LI) & (mi < normal_limit$LS) ){
+        v_cob_normal_CI <- v_cob_normal_CI + 1
+      }
+      
+      # Calculando IC Clássico
+      pois_limit <- IC_CL(rpois(n_amostra, lambda = mi), alpha)
+      normal_limit <- IC_CL(rnorm(n_amostra, mean = mi), alpha)
+    
+      # Calculando a cobertura (nivel de acerto) do IC_CL
+      if( (mi > pois_limit$LI) & (mi < pois_limit$LS) ){
+        v_cob_poisson_CL <- v_cob_poisson_CL + 1
+      }
+      
+      if( (mi > normal_limit$LI) & (mi < normal_limit$LS) ){
+        v_cob_normal_CL <- v_cob_normal_CL + 1
+      }
+  }
+  cob_poisson_CI[i] <- v_cob_poisson_CI/n_corridas
+  cob_poisson_CL[i] <- v_cob_poisson_CL/n_corridas
+  cob_normal_CI[i] <- v_cob_normal_CI/n_corridas
+  cob_normal_CL[i] <- v_cob_normal_CL/n_corridas
+}
+```
+
+
+```{r}
+result <- data.frame(
+  distribuicao = c(rep("poisson", 5), rep("normal", 5)),
+  amostra = rep(c(10, 20, 50, 100, 200), 2),
+  cob_comput_intens = c(cob_poisson_CI, cob_normal_CI),
+  cob_classico = c(cob_poisson_CL, cob_normal_CL)
+)
+
+result["CL-CI"] <- result$cob_classico - result$cob_comput_intens
+head(result, 10)
+mean(result$`CL-CI`)
+```
+
+## 3- Considerações finais
+- Como era de se esperar, quanto maior o número da amostra, mais próximo de 1 ficou a proporção de cobertura para ambas as metodologias;
+
+- No geral, o método clássico foi mais preciso, comparando-o com o Boostrap. Entretanto, a diferença do método clássico para o comput_intensivo não foi tão discrepante, apresentando um erro médio estatisticamente baixo, indicando-nos que é, de fato, uma metodologia com uma boa eficácia;
+
+
+## 4- Referências
+- [1] F. R. B. Cruz. Introdução à Estatística Computacional - Notas de Aula. Departamento de Estatística - ICEx - UFMG, Belo Horizonte, 2019 (disponível na homepage da disciplina Introdução à Estatística Computacional).
+
+- [2] Eduardo Almeida r-markdown-reporting-best-practices, 2022. (Disponível em https://appsilon.com/r-markdown-reporting-best-practices/)
+
+- [3] Jim Frost. Introduction to bootstrap in statistics with an example, 2018 (Disponível em https://statisticsbyjim.com/hypothesis-testing/bootstrapping/)
